@@ -321,10 +321,21 @@ impl State {
 
         if velocity.length_squared() > 0.0 {
             velocity = velocity.normalize() * speed * dt;
-            self.camera.position += velocity;
 
-            // Track zoom depth based on how far we've traveled
-            self.zoom_depth += velocity.length() * 0.1;
+            // Forward movement increases zoom depth (going deeper into the fractal)
+            let forward_component = velocity.dot(self.camera.forward());
+            if forward_component > 0.0 {
+                // Moving forward = zooming in = more detail emerges
+                self.zoom_depth += forward_component * 0.5;
+            } else if forward_component < 0.0 {
+                // Moving backward = zooming out
+                self.zoom_depth = (self.zoom_depth + forward_component * 0.5).max(0.0);
+            }
+
+            // Scale movement by zoom depth - deeper = slower movement in world space
+            // This creates the "infinite zoom" effect
+            let scale_factor = (-self.zoom_depth * 0.3).exp();
+            self.camera.position += velocity * scale_factor;
         }
 
         // Update uniforms
@@ -500,6 +511,14 @@ fn main() {
                         }
                         _ => {}
                     }
+                }
+                WindowEvent::MouseWheel { delta, .. } => {
+                    // Scroll to zoom in/out
+                    let scroll = match delta {
+                        winit::event::MouseScrollDelta::LineDelta(_, y) => *y,
+                        winit::event::MouseScrollDelta::PixelDelta(pos) => pos.y as f32 * 0.01,
+                    };
+                    state.zoom_depth = (state.zoom_depth + scroll * 0.2).max(0.0);
                 }
                 WindowEvent::MouseInput {
                     state: ElementState::Pressed,
