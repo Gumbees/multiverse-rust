@@ -144,13 +144,12 @@ fn quantum_fractal_de(pos: vec3<f32>, obs_seed: f32, scale_depth: f32) -> vec4<f
     var r: f32 = 0.0;
     var orbit_trap: f32 = 1e10;
 
-    // Scale determines how deep into infinite detail we go
-    let effective_scale = exp(-scale_depth * 0.5);
-
-    // Power fluctuates based on quantum state - different observations yield different fractals
+    // Power fluctuates based on quantum state and depth
+    // Different observations and depths yield different fractals
     let power_base = uniforms.power;
-    let power_fluctuation = (obs_seed - 0.5) * 2.0; // -1 to 1
-    let power = power_base + power_fluctuation * 0.5;
+    let depth_variation = sin(scale_depth * 0.5) * 0.3;
+    let power_fluctuation = (obs_seed - 0.5) * 0.5;
+    let power = power_base + power_fluctuation + depth_variation;
 
     // Iterate the fractal with quantum perturbations
     for (var i = 0; i < 15; i++) {
@@ -162,9 +161,9 @@ fn quantum_fractal_de(pos: vec3<f32>, obs_seed: f32, scale_depth: f32) -> vec4<f
         var phi = atan2(z.y, z.x);
 
         // Quantum perturbation at each iteration
-        // This creates different detail at each observation
-        let iter_seed = hash31(z * effective_scale + vec3<f32>(f32(i) * 0.1));
-        let quantum_perturb = (iter_seed - 0.5) * 0.1 * (1.0 - effective_scale);
+        // Seeded by position in fractal space - creates consistent but varied detail
+        let iter_seed = hash31(z * 10.0 + vec3<f32>(f32(i) * 0.1 + scale_depth));
+        let quantum_perturb = (iter_seed - 0.5) * 0.08;
 
         theta += quantum_perturb;
         phi += quantum_perturb * 0.5;
@@ -187,35 +186,45 @@ fn quantum_fractal_de(pos: vec3<f32>, obs_seed: f32, scale_depth: f32) -> vec4<f
         orbit_trap = min(orbit_trap, abs(z.x) + abs(z.y) * 0.5);
     }
 
-    // Distance estimate with scale factor for infinite zoom
-    let dist = 0.5 * log(r) * r / dr * effective_scale;
+    // Standard distance estimate (scaling handled by caller)
+    let dist = 0.5 * log(r) * r / dr;
 
     return vec4<f32>(dist, orbit_trap, r, obs_seed);
 }
 
 // Multi-scale quantum fractal - detail emerges at each scale layer
 fn multi_scale_quantum_de(pos: vec3<f32>, obs_seed: f32) -> vec4<f32> {
-    // Calculate the current scale based on camera distance from origin
-    let cam_dist = length(uniforms.camera_pos);
-    let scale_depth = log(max(cam_dist, 0.001)) * -1.0 + uniforms.zoom_depth;
+    // The zoom_depth determines which "layer" of the fractal we're viewing
+    // Higher zoom = sampling at finer scales = new detail emerges
+    let zoom_scale = exp(uniforms.zoom_depth);
 
-    // Get base fractal
-    var result = quantum_fractal_de(pos, obs_seed, scale_depth);
+    // Scale position to fractal space - this is the key to infinite zoom
+    // As zoom increases, we sample at increasingly fine coordinates
+    let fractal_pos = pos / zoom_scale;
 
-    // Add detail layers that emerge at deeper scales
-    let num_detail_layers = i32(min(scale_depth * 2.0, 5.0));
+    // Get base fractal at the scaled position
+    var result = quantum_fractal_de(fractal_pos, obs_seed, uniforms.zoom_depth);
 
-    for (var layer = 1; layer <= 5; layer++) {
+    // Scale distance back to world space
+    result.x *= zoom_scale;
+
+    // Add detail layers based on zoom depth
+    // More layers emerge as we zoom deeper
+    let num_detail_layers = i32(min(uniforms.zoom_depth + 1.0, 6.0));
+
+    for (var layer = 1; layer <= 6; layer++) {
         if (layer > num_detail_layers) { break; }
 
         let layer_scale = pow(2.0, f32(layer));
-        let layer_seed = hash31(pos * layer_scale + vec3<f32>(obs_seed * f32(layer)));
+        let detail_pos = fractal_pos * layer_scale;
+        let layer_seed = hash31(detail_pos + vec3<f32>(obs_seed * f32(layer)));
 
-        // Each layer adds finer detail
-        let detail = quantum_collapse(pos * layer_scale, layer_scale, 0.5);
+        // Each layer adds finer detail at constant visual scale
+        let detail = quantum_collapse(detail_pos, layer_scale, 0.5);
 
-        // Modulate the distance with detail (creates new structure at each scale)
-        result.x *= 1.0 + (detail - 0.5) * 0.3 / layer_scale;
+        // Modulate distance - creates new structure at each scale
+        // The modulation is constant in screen space, not world space
+        result.x *= 1.0 + (detail - 0.5) * 0.2;
     }
 
     return result;
@@ -260,9 +269,8 @@ fn ray_march(ro: vec3<f32>, rd: vec3<f32>, obs_seed: f32) -> vec4<f32> {
     var glow: f32 = 0.0;
     var quantum_state: f32 = 0.0;
 
-    // Adaptive step size based on scale
-    let scale_factor = exp(-uniforms.zoom_depth * 0.3);
-    let min_dist = SURF_DIST * scale_factor;
+    // Surface distance threshold - constant in screen space
+    let min_dist = SURF_DIST;
 
     for (var i = 0; i < MAX_STEPS; i++) {
         let p = ro + rd * t;
@@ -277,9 +285,9 @@ fn ray_march(ro: vec3<f32>, rd: vec3<f32>, obs_seed: f32) -> vec4<f32> {
         if (d < min_dist) {
             return vec4<f32>(t, orbit_trap, glow, quantum_state);
         }
-        if (t > MAX_DIST * scale_factor) { break; }
+        if (t > MAX_DIST) { break; }
 
-        // Adaptive stepping
+        // Step forward
         t += d * 0.6;
     }
 
@@ -332,8 +340,12 @@ fn probability_overlay(p: vec3<f32>, normal_col: vec3<f32>) -> vec3<f32> {
 fn fs_main(in: VertexOutput) -> @location(0) vec4<f32> {
     let uv = (in.position.xy - 0.5 * uniforms.resolution) / uniforms.resolution.y;
 
-    // Camera ray
-    let ro = uniforms.camera_pos;
+    // Zoom scale factor - exponential zoom into fractal space
+    let zoom_scale = exp(uniforms.zoom_depth);
+
+    // Camera ray - scale the origin by zoom to dive into fractal
+    // This keeps detail size constant on screen while revealing new patterns
+    let ro = uniforms.camera_pos * zoom_scale;
     let rd = normalize(
         uniforms.camera_forward +
         uv.x * uniforms.camera_right +
@@ -385,9 +397,8 @@ fn fs_main(in: VertexOutput) -> @location(0) vec4<f32> {
         // Glow from probability density
         col += cosmic_palette(hit.z * 0.1, uniforms.color_shift) * hit.z * 0.015;
 
-        // Depth fog
-        let scale_factor = exp(-uniforms.zoom_depth * 0.3);
-        let fog_amount = 1.0 - exp(-hit.x * 0.05 / scale_factor);
+        // Depth fog - constant visual density regardless of zoom
+        let fog_amount = 1.0 - exp(-hit.x * 0.05);
         col = mix(col, background(rd, uniforms.time), fog_amount);
 
     } else {
