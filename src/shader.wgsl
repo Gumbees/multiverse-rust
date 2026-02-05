@@ -37,201 +37,66 @@ fn vs_main(@builtin(vertex_index) vertex_index: u32) -> VertexOutput {
     return out;
 }
 
-const MAX_STEPS: i32 = 256;
+const MAX_STEPS: i32 = 200;
 const MAX_DIST: f32 = 100.0;
-const SURF_DIST: f32 = 0.0001;
 const PI: f32 = 3.14159265359;
 
 // ============================================================================
-// QUANTUM NOISE FUNCTIONS - Procedural coherent randomness
+// CLEAN MANDELBULB - True fractal with infinite self-similar detail
 // ============================================================================
 
-// Hash function for position-based seeding
-fn hash31(p: vec3<f32>) -> f32 {
-    var p3 = fract(p * 0.1031);
-    p3 += dot(p3, p3.yzx + 33.33);
-    return fract((p3.x + p3.y) * p3.z);
-}
-
-fn hash33(p: vec3<f32>) -> vec3<f32> {
-    var p3 = fract(p * vec3<f32>(0.1031, 0.1030, 0.0973));
-    p3 += dot(p3, p3.yxz + 33.33);
-    return fract((p3.xxy + p3.yxx) * p3.zyx);
-}
-
-// Smooth noise for coherent quantum states
-fn noise3d(p: vec3<f32>) -> f32 {
-    let i = floor(p);
-    let f = fract(p);
-    let u = f * f * (3.0 - 2.0 * f);
-
-    return mix(
-        mix(
-            mix(hash31(i + vec3<f32>(0.0, 0.0, 0.0)), hash31(i + vec3<f32>(1.0, 0.0, 0.0)), u.x),
-            mix(hash31(i + vec3<f32>(0.0, 1.0, 0.0)), hash31(i + vec3<f32>(1.0, 1.0, 0.0)), u.x),
-            u.y
-        ),
-        mix(
-            mix(hash31(i + vec3<f32>(0.0, 0.0, 1.0)), hash31(i + vec3<f32>(1.0, 0.0, 1.0)), u.x),
-            mix(hash31(i + vec3<f32>(0.0, 1.0, 1.0)), hash31(i + vec3<f32>(1.0, 1.0, 1.0)), u.x),
-            u.y
-        ),
-        u.z
-    );
-}
-
-// Fractal Brownian Motion - coherent detail at multiple scales
-fn fbm(p: vec3<f32>, octaves: i32) -> f32 {
-    var value: f32 = 0.0;
-    var amplitude: f32 = 0.5;
-    var frequency: f32 = 1.0;
-    var pos = p;
-
-    for (var i = 0; i < octaves; i++) {
-        value += amplitude * noise3d(pos * frequency);
-        amplitude *= 0.5;
-        frequency *= 2.0;
-    }
-
-    return value;
-}
-
-// ============================================================================
-// QUANTUM WAVEFUNCTION COLLAPSE
-// The observation collapses infinite possibility into specific form
-// ============================================================================
-
-// Observation seed - deterministic for same viewpoint, changes when looking away
-fn observation_seed(ray_origin: vec3<f32>, ray_dir: vec3<f32>, scale: f32) -> f32 {
-    // Quantize the ray direction to create "measurement bins"
-    // This means similar rays collapse to similar states (coherence)
-    let quantized_dir = floor(ray_dir * 100.0) / 100.0;
-
-    // The seed depends on where we're looking FROM and TO
-    let origin_hash = hash31(ray_origin * scale);
-    let dir_hash = hash31(quantized_dir * 1000.0 + vec3<f32>(origin_hash));
-
-    // Time creates temporal decoherence - states drift
-    let temporal_drift = sin(uniforms.time * 0.1) * 0.1;
-
-    return dir_hash + temporal_drift;
-}
-
-// Collapse function - given a position, return the collapsed quantum state
-// This is deterministic for the same position+scale but appears random
-fn quantum_collapse(p: vec3<f32>, scale: f32, coherence: f32) -> f32 {
-    // Multiple scale layers - infinite detail emerges from observation
-    let base_scale = scale * 0.5;
-
-    // Coherent noise gives smooth probability distribution
-    let probability_field = fbm(p * base_scale, 5);
-
-    // "Collapse" happens when we cross probability thresholds
-    // The coherence parameter controls how sharp the collapse is
-    let collapsed = smoothstep(0.3 - coherence * 0.2, 0.7 + coherence * 0.2, probability_field);
-
-    return collapsed;
-}
-
-// ============================================================================
-// QUANTUM FRACTAL DISTANCE ESTIMATOR
-// The fractal itself is probabilistic - form emerges from observation
-// ============================================================================
-
-fn quantum_fractal_de(pos: vec3<f32>, obs_seed: f32, scale_depth: f32) -> vec4<f32> {
+fn mandelbulb_de(pos: vec3<f32>, power: f32) -> vec2<f32> {
     var z = pos;
     var dr: f32 = 1.0;
     var r: f32 = 0.0;
     var orbit_trap: f32 = 1e10;
 
-    // Power fluctuates based on quantum state and depth
-    // Different observations and depths yield different fractals
-    let power_base = uniforms.power;
-    let depth_variation = sin(scale_depth * 0.5) * 0.3;
-    let power_fluctuation = (obs_seed - 0.5) * 0.5;
-    let power = power_base + power_fluctuation + depth_variation;
-
-    // Iterate the fractal with quantum perturbations
     for (var i = 0; i < 15; i++) {
         r = length(z);
         if (r > 2.0) { break; }
 
-        // Convert to polar
-        var theta = acos(z.z / r);
-        var phi = atan2(z.y, z.x);
+        // Convert to spherical coordinates
+        let theta = acos(z.z / r);
+        let phi = atan2(z.y, z.x);
 
-        // Quantum perturbation at each iteration
-        // Seeded by position in fractal space - creates consistent but varied detail
-        let iter_seed = hash31(z * 10.0 + vec3<f32>(f32(i) * 0.1 + scale_depth));
-        let quantum_perturb = (iter_seed - 0.5) * 0.08;
-
-        theta += quantum_perturb;
-        phi += quantum_perturb * 0.5;
-
+        // Derivative
         dr = pow(r, power - 1.0) * power * dr + 1.0;
 
+        // Scale and rotate the point
         let zr = pow(r, power);
         let new_theta = theta * power;
         let new_phi = phi * power;
 
+        // Convert back to cartesian
         z = zr * vec3<f32>(
             sin(new_theta) * cos(new_phi),
-            sin(new_phi) * sin(new_theta),
+            sin(new_theta) * sin(new_phi),
             cos(new_theta)
         );
         z += pos;
 
-        // Orbit trap for coloring - tracks the "probability density"
+        // Orbit trap for coloring
         orbit_trap = min(orbit_trap, length(z));
-        orbit_trap = min(orbit_trap, abs(z.x) + abs(z.y) * 0.5);
     }
 
-    // Standard distance estimate (scaling handled by caller)
+    // Distance estimate
     let dist = 0.5 * log(r) * r / dr;
-
-    return vec4<f32>(dist, orbit_trap, r, obs_seed);
+    return vec2<f32>(dist, orbit_trap);
 }
 
-// Multi-scale quantum fractal - detail emerges at each scale layer
-fn multi_scale_quantum_de(pos: vec3<f32>, obs_seed: f32) -> vec4<f32> {
-    // The zoom_depth determines which "layer" of the fractal we're viewing
-    // Higher zoom = sampling at finer scales = new detail emerges
-    let zoom_scale = exp(uniforms.zoom_depth);
+// ============================================================================
+// INFINITE ZOOM WRAPPER
+// The key: scale coordinates to sample fractal at any depth
+// ============================================================================
 
-    // Scale position to fractal space - this is the key to infinite zoom
-    // As zoom increases, we sample at increasingly fine coordinates
-    let fractal_pos = pos / zoom_scale;
-
-    // Get base fractal at the scaled position
-    var result = quantum_fractal_de(fractal_pos, obs_seed, uniforms.zoom_depth);
-
-    // Scale distance back to world space
-    result.x *= zoom_scale;
-
-    // Add detail layers based on zoom depth
-    // More layers emerge as we zoom deeper
-    let num_detail_layers = i32(min(uniforms.zoom_depth + 1.0, 6.0));
-
-    for (var layer = 1; layer <= 6; layer++) {
-        if (layer > num_detail_layers) { break; }
-
-        let layer_scale = pow(2.0, f32(layer));
-        let detail_pos = fractal_pos * layer_scale;
-        let layer_seed = hash31(detail_pos + vec3<f32>(obs_seed * f32(layer)));
-
-        // Each layer adds finer detail at constant visual scale
-        let detail = quantum_collapse(detail_pos, layer_scale, 0.5);
-
-        // Modulate distance - creates new structure at each scale
-        // The modulation is constant in screen space, not world space
-        result.x *= 1.0 + (detail - 0.5) * 0.2;
-    }
-
+fn infinite_fractal_de(world_pos: vec3<f32>) -> vec2<f32> {
+    // Direct fractal evaluation - camera already scaled by zoom
+    let result = mandelbulb_de(world_pos, uniforms.power);
     return result;
 }
 
 // ============================================================================
-// LIGHTING AND RENDERING
+// RENDERING
 // ============================================================================
 
 fn cosmic_palette(t: f32, shift: f32) -> vec3<f32> {
@@ -242,140 +107,115 @@ fn cosmic_palette(t: f32, shift: f32) -> vec3<f32> {
     return a + b * cos(6.28318 * (c * t + d));
 }
 
-fn calc_normal(p: vec3<f32>, obs_seed: f32) -> vec3<f32> {
-    let e = vec2<f32>(0.0001, 0.0);
+fn calc_normal(p: vec3<f32>) -> vec3<f32> {
+    let zoom = exp(uniforms.zoom_depth);
+    let e = 0.0001 / zoom;
     return normalize(vec3<f32>(
-        multi_scale_quantum_de(p + e.xyy, obs_seed).x - multi_scale_quantum_de(p - e.xyy, obs_seed).x,
-        multi_scale_quantum_de(p + e.yxy, obs_seed).x - multi_scale_quantum_de(p - e.yxy, obs_seed).x,
-        multi_scale_quantum_de(p + e.yyx, obs_seed).x - multi_scale_quantum_de(p - e.yyx, obs_seed).x
+        infinite_fractal_de(p + vec3<f32>(e, 0.0, 0.0)).x - infinite_fractal_de(p - vec3<f32>(e, 0.0, 0.0)).x,
+        infinite_fractal_de(p + vec3<f32>(0.0, e, 0.0)).x - infinite_fractal_de(p - vec3<f32>(0.0, e, 0.0)).x,
+        infinite_fractal_de(p + vec3<f32>(0.0, 0.0, e)).x - infinite_fractal_de(p - vec3<f32>(0.0, 0.0, e)).x
     ));
 }
 
-fn calc_ao(pos: vec3<f32>, nor: vec3<f32>, obs_seed: f32) -> f32 {
+fn calc_ao(pos: vec3<f32>, nor: vec3<f32>) -> f32 {
     var occ: f32 = 0.0;
     var sca: f32 = 1.0;
+    let zoom = exp(uniforms.zoom_depth);
     for (var i = 0; i < 5; i++) {
-        let h = 0.01 + 0.08 * f32(i) / 4.0;
-        let d = multi_scale_quantum_de(pos + h * nor, obs_seed).x;
+        let h = (0.01 + 0.1 * f32(i) / 4.0) / zoom;
+        let d = infinite_fractal_de(pos + h * nor).x;
         occ += (h - d) * sca;
-        sca *= 0.95;
+        sca *= 0.9;
     }
-    return clamp(1.0 - 3.0 * occ, 0.0, 1.0);
+    return clamp(1.0 - 2.0 * occ, 0.0, 1.0);
 }
 
-fn ray_march(ro: vec3<f32>, rd: vec3<f32>, obs_seed: f32) -> vec4<f32> {
+fn ray_march(ro: vec3<f32>, rd: vec3<f32>) -> vec3<f32> {
     var t: f32 = 0.0;
     var orbit_trap: f32 = 0.0;
-    var glow: f32 = 0.0;
-    var quantum_state: f32 = 0.0;
 
-    // Surface distance threshold - constant in screen space
-    let min_dist = SURF_DIST;
+    // Surface and max distance scale with zoom
+    let zoom = exp(uniforms.zoom_depth);
+    let surf_dist = 0.0005 / zoom;
+    let max_dist = MAX_DIST / zoom;
 
     for (var i = 0; i < MAX_STEPS; i++) {
         let p = ro + rd * t;
-        let res = multi_scale_quantum_de(p, obs_seed);
+        let res = infinite_fractal_de(p);
         let d = res.x;
         orbit_trap = res.y;
-        quantum_state = res.w;
 
-        // Accumulate glow from probability density
-        glow += 0.1 / (1.0 + d * d * 100.0);
-
-        if (d < min_dist) {
-            return vec4<f32>(t, orbit_trap, glow, quantum_state);
+        if (d < surf_dist) {
+            return vec3<f32>(t, orbit_trap, 1.0);
         }
-        if (t > MAX_DIST) { break; }
+        if (t > max_dist) { break; }
 
-        // Step forward
-        t += d * 0.6;
+        t += d * 0.7;
     }
 
-    return vec4<f32>(-1.0, orbit_trap, glow, quantum_state);
+    return vec3<f32>(-1.0, orbit_trap, 0.0);
 }
 
 fn star_field(rd: vec3<f32>) -> f32 {
-    var p = rd * 500.0;
+    var p = rd * 300.0;
     var stars: f32 = 0.0;
 
     for (var i = 0; i < 3; i++) {
-        let q = fract(p * (0.4 + f32(i) * 0.2)) - 0.5;
+        let q = fract(p * (0.3 + f32(i) * 0.15)) - 0.5;
         let s = length(q);
-        stars += smoothstep(0.08, 0.0, s) * (0.3 + f32(i) * 0.2);
-        p = p * 1.5 + vec3<f32>(13.0, 17.0, 19.0);
+        stars += smoothstep(0.05, 0.0, s) * (0.4 + f32(i) * 0.2);
+        p = p * 1.4 + vec3<f32>(7.0, 11.0, 13.0);
     }
 
-    return stars * 0.5;
+    return stars * 0.4;
 }
 
-fn background(rd: vec3<f32>, time: f32) -> vec3<f32> {
+fn background(rd: vec3<f32>) -> vec3<f32> {
     let stars = star_field(rd);
-
-    // Quantum foam background - probability waves
-    let foam_pos = rd * 5.0 + vec3<f32>(time * 0.05);
-    let foam = fbm(foam_pos, 3) * 0.15;
 
     var col = mix(
         vec3<f32>(0.01, 0.01, 0.02),
-        vec3<f32>(0.04, 0.02, 0.06),
+        vec3<f32>(0.03, 0.01, 0.05),
         rd.y * 0.5 + 0.5
     );
 
-    col += cosmic_palette(foam + time * 0.02, uniforms.color_shift) * foam * 0.5;
-    col += stars * vec3<f32>(0.8, 0.9, 1.0);
-
+    col += stars * vec3<f32>(0.9, 0.95, 1.0);
     return col;
-}
-
-// Probability field visualization - shows the quantum superposition
-fn probability_overlay(p: vec3<f32>, normal_col: vec3<f32>) -> vec3<f32> {
-    let prob = quantum_collapse(p, 1.0, 0.3);
-    let prob_color = cosmic_palette(prob, uniforms.color_shift + 0.3);
-
-    // Subtle probability visualization
-    return mix(normal_col, prob_color, 0.1);
 }
 
 @fragment
 fn fs_main(in: VertexOutput) -> @location(0) vec4<f32> {
     let uv = (in.position.xy - 0.5 * uniforms.resolution) / uniforms.resolution.y;
 
-    // Zoom scale factor - exponential zoom into fractal space
-    let zoom_scale = exp(uniforms.zoom_depth);
+    // Zoom factor
+    let zoom = exp(uniforms.zoom_depth);
 
-    // Camera ray - scale the origin by zoom to dive into fractal
-    // This keeps detail size constant on screen while revealing new patterns
-    let ro = uniforms.camera_pos * zoom_scale;
+    // Camera setup - scale position by zoom to get closer in fractal space
+    // This is the key: camera dives deeper as zoom increases
+    let ro = uniforms.camera_pos / zoom;
     let rd = normalize(
         uniforms.camera_forward +
         uv.x * uniforms.camera_right +
         uv.y * uniforms.camera_up
     );
 
-    // Calculate observation seed - THIS IS THE MEASUREMENT
-    // Same position + direction = same collapsed state (coherence)
-    // Different observation = possibility of different state
-    let obs_seed = observation_seed(ro, rd, 1.0);
+    // Rotating light follows camera, scaled by zoom
+    let light_angle = uniforms.time * 0.3;
+    let light_offset = vec3<f32>(sin(light_angle) * 2.0, 1.5, cos(light_angle) * 2.0) / zoom;
+    let light_pos = ro + light_offset;
 
-    // Rotating light
-    let light_angle = uniforms.time * 0.2;
-    let light_pos = ro + vec3<f32>(sin(light_angle) * 3.0, 2.0, cos(light_angle) * 3.0);
-
-    let hit = ray_march(ro, rd, obs_seed);
+    let hit = ray_march(ro, rd);
 
     var col: vec3<f32>;
 
-    if (hit.x > 0.0) {
+    if (hit.z > 0.5) {
         let p = ro + rd * hit.x;
-        let n = calc_normal(p, obs_seed);
+        let n = calc_normal(p);
 
-        // Color based on orbit trap and quantum state
+        // Color from orbit trap + zoom depth for variation
         let trap = hit.y;
-        let q_state = hit.w;
-        var base_color = cosmic_palette(trap * 0.4 + q_state * 0.3 + 0.2, uniforms.color_shift);
-
-        // Add probability visualization
-        base_color = probability_overlay(p, base_color);
+        let depth_color = uniforms.zoom_depth * 0.1;
+        var base_color = cosmic_palette(trap * 0.5 + depth_color, uniforms.color_shift);
 
         // Lighting
         let light_dir = normalize(light_pos - p);
@@ -385,30 +225,24 @@ fn fs_main(in: VertexOutput) -> @location(0) vec4<f32> {
         let diff = max(dot(n, light_dir), 0.0);
         let spec = pow(max(dot(n, half_dir), 0.0), 32.0);
         let fresnel = pow(1.0 - max(dot(n, view_dir), 0.0), 3.0);
-        let ao = calc_ao(p, n, obs_seed);
+        let ao = calc_ao(p, n);
 
-        let ambient = base_color * 0.12 * ao;
+        let ambient = base_color * 0.15 * ao;
         let diffuse = base_color * diff * 0.7;
-        let specular = vec3<f32>(0.8, 0.85, 1.0) * spec * 0.5;
-        let rim = base_color * fresnel * 0.25;
+        let specular = vec3<f32>(1.0, 0.95, 0.9) * spec * 0.4;
+        let rim = base_color * fresnel * 0.2;
 
         col = ambient + diffuse + specular + rim;
 
-        // Glow from probability density
-        col += cosmic_palette(hit.z * 0.1, uniforms.color_shift) * hit.z * 0.015;
-
-        // Depth fog - constant visual density regardless of zoom
-        let fog_amount = 1.0 - exp(-hit.x * 0.05);
-        col = mix(col, background(rd, uniforms.time), fog_amount);
+        // Depth fog - scale with zoom
+        let fog_amount = 1.0 - exp(-hit.x * zoom * 0.1);
+        col = mix(col, background(rd), fog_amount);
 
     } else {
-        col = background(rd, uniforms.time);
-
-        // Even misses show the probability glow
-        col += cosmic_palette(hit.z * 0.1 + uniforms.time * 0.05, uniforms.color_shift) * hit.z * 0.01;
+        col = background(rd);
     }
 
-    // Tone mapping
+    // Tone mapping (ACES)
     col = col * (2.51 * col + 0.03) / (col * (2.43 * col + 0.59) + 0.14);
 
     // Gamma
@@ -416,7 +250,7 @@ fn fs_main(in: VertexOutput) -> @location(0) vec4<f32> {
 
     // Vignette
     let vignette_uv = in.position.xy / uniforms.resolution;
-    col *= 0.8 + 0.2 * pow(16.0 * vignette_uv.x * vignette_uv.y * (1.0 - vignette_uv.x) * (1.0 - vignette_uv.y), 0.2);
+    col *= 0.85 + 0.15 * pow(16.0 * vignette_uv.x * vignette_uv.y * (1.0 - vignette_uv.x) * (1.0 - vignette_uv.y), 0.25);
 
     return vec4<f32>(col, 1.0);
 }
